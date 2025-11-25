@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      canvas {
+        margin: 0;
+        display: block;
+      }
+
+      /* basic modal styling */
+      .modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 1000;
+      }
+      .modal-content {
+        position: relative;
+        background: #fff;
+        padding: 20px;
+        border-radius: 8px;
+      }
+      .close-button {
+        cursor: pointer;
+        position: absolute;
+        top: 8px;
+        right: 12px;
+        font-size: 24px;
+        line-height: 1;
+      }
+    </style>
+    <title>Advent Calendar</title>
+  </head>
+  <body>
+    <noscript
+      >This website cannot work without JavaScript, please enable it in your
+      browser's settings</noscript
+    >
+    <main style="height: 100vh; width: 100vw">
+      <canvas></canvas>
+    </main>
+    <script>
+      if (new URLSearchParams(window.location.search).get("reset")) {
+        localStorage.removeItem("calendarData");
+        localStorage.removeItem("opened");
+      }
+
+      const canvas = document.querySelector("canvas");
+      window.addEventListener("resize", displayCalendar);
+
+      function parseContent(content) {
+        const result = document.createElement("div");
+        content.forEach((el) => {
+          switch (el.type) {
+            case "text":
+              const textel = document.createElement("p");
+              textel.textContent = el.content;
+              for (const [key, value] of Object.entries(el.attributes || {})) {
+                textel.setAttribute(key, value);
+              }
+              result.appendChild(textel);
+              break;
+
+            case "audio":
+              const audioel = document.createElement("audio");
+              audioel.src = el.content;
+              audioel.controls = true;
+              for (const [key, value] of Object.entries(el.attributes || {})) {
+                audioel.setAttribute(key, value);
+              }
+              result.appendChild(audioel);
+              break;
+            case "image":
+              const imgel = document.createElement("img");
+              imgel.src = el.content;
+              for (const [key, value] of Object.entries(el.attributes || {})) {
+                imgel.setAttribute(key, value);
+              }
+              result.appendChild(imgel);
+              break;
+          }
+        });
+        return result.innerHTML;
+      }
+
+      // reusable modal display function
+      function displayDay(dayData, i) {
+        const div = document.createElement("div");
+        div.innerHTML = `
+          <div class="modal">
+            <div class="modal-content">
+              <span class="close-button" id="close-button">&times;</span>
+              <h2>${dayData.name ?? "Day " + (i + 1)}</h2>
+              <p>${parseContent(dayData.content) ?? "No content available."}</p>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(div);
+
+        // get references inside the appended fragment and wire up close behavior
+        const modal = div.querySelector(".modal");
+        const closeBtn = div.querySelector("#close-button");
+        if (modal) {
+          modal.style.display = "flex";
+          modal.addEventListener("click", (e) => {
+            if (e.target === modal) {
+              div.remove();
+            }
+          });
+        }
+        if (closeBtn) {
+          closeBtn.addEventListener("click", () => div.remove());
+        }
+      }
+
+      canvas.addEventListener("click", (event) => {
+        const calendarData = JSON.parse(localStorage.getItem("calendarData"));
+        if (!calendarData) return;
+
+        // determine which cell was clicked
+        const rect = canvas.getBoundingClientRect();
+        const totalDays = calendarData.days.length;
+        const cols = Math.ceil(Math.sqrt(totalDays));
+        const rows = Math.ceil(totalDays / cols);
+        const cellWidth = canvas.width / cols;
+        const cellHeight = canvas.height / rows;
+
+        // translate event coordinates to canvas coordinates (account for CSS scaling)
+        const canvasX =
+          (event.clientX - rect.left) * (canvas.width / rect.width);
+        const canvasY =
+          (event.clientY - rect.top) * (canvas.height / rect.height);
+
+        const col = Math.floor(canvasX / cellWidth);
+        const row = Math.floor(canvasY / cellHeight);
+        const index = row * cols + col;
+        if (index < 0 || index >= totalDays) return;
+
+        // check whether the clicked day is available
+        const currentDay = new Date(calendarData.start_date);
+        currentDay.setDate(currentDay.getDate() + index);
+        const today = new Date();
+        if (today < currentDay) return; // still locked
+
+        // mark as opened if not already
+        const opened = JSON.parse(localStorage.getItem("opened") ?? "[]");
+        const dayISO = currentDay.toISOString();
+        if (!opened.includes(dayISO)) {
+          opened.push(dayISO);
+          localStorage.setItem("opened", JSON.stringify(opened));
+        }
+
+        // show the modal for the clicked day
+        displayDay(calendarData.days[index], index);
+      });
+
+      function displayCalendar() {
+        const calendarData = JSON.parse(localStorage.getItem("calendarData"));
+        if (!calendarData) {
+          loadCalendar();
+          return;
+        }
+
+        // set canvas size to viewport
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        canvas.width = width;
+        canvas.height = height;
+        canvas.style.width = width + "px";
+        canvas.style.height = height + "px";
+
+        const ctx = canvas.getContext("2d");
+        const totalDays = calendarData.days.length;
+        const cols = Math.ceil(Math.sqrt(totalDays));
+        const rows = Math.ceil(totalDays / cols);
+        const cellWidth = canvas.width / cols;
+        const cellHeight = canvas.height / rows;
+        const today = new Date();
+
+        for (let i = 0; i < totalDays; i++) {
+          const col = i % cols;
+          const row = Math.floor(i / cols);
+          const x = col * cellWidth;
+          const y = row * cellHeight;
+
+          ctx.strokeStyle = "black";
+          ctx.strokeRect(x, y, cellWidth, cellHeight);
+
+          const currentDay = new Date(calendarData.start_date);
+          currentDay.setDate(currentDay.getDate() + i);
+
+          if (today >= currentDay) {
+            // parse the opened list safely (default to empty array) and check the cell's date
+            const opened = JSON.parse(localStorage.getItem("opened") ?? "[]");
+            ctx.fillStyle = opened.includes(currentDay.toISOString())
+              ? "lightgreen"
+              : "darkgreen";
+            ctx.fillRect(x, y, cellWidth, cellHeight);
+            ctx.fillStyle = "black";
+            ctx.font = "20px Arial";
+            ctx.fillText(
+              calendarData.days[i].name ?? `Day ${i + 1}`,
+              x + cellWidth * 0.05, // 5% of cell width
+              y + cellHeight * 0.15, // 15% of cell height
+              cellWidth * 0.9 // 90% of cell width
+            );
+          } else {
+            ctx.fillStyle = "lightgray";
+            ctx.fillRect(x, y, cellWidth, cellHeight);
+            ctx.fillStyle = "black";
+            ctx.font = "20px Arial";
+            ctx.fillText(
+              "Locked",
+              x + cellWidth * 0.65, // Center horizontally
+              y + cellHeight * 0.9 // Center vertically
+            );
+            ctx.fillText(
+              calendarData.days[i].name ?? `Day ${i + 1}`,
+              x + cellWidth * 0.05, // 5% of cell width
+              y + cellHeight * 0.15, // 15% of cell height
+              cellWidth * 0.9 // 90% of cell width
+            );
+          }
+        }
+
+        requestAnimationFrame(displayCalendar);
+      }
+
+      function loadCalendar() {
+        const XHR = new XMLHttpRequest();
+        XHR.open("GET", "/calendar.json");
+        XHR.onload = () => {
+          if (XHR.status == 200) {
+            localStorage.setItem("calendarData", XHR.responseText);
+            requestAnimationFrame(displayCalendar);
+          } else {
+            document.body.innerHTML =
+              "Failed to load calendar data, please try again later.";
+            console.error("Failed to load calendar data");
+          }
+        };
+        XHR.send();
+      }
+      loadCalendar();
+    </script>
+  </body>
+</html>
